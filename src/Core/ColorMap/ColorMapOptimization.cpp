@@ -104,6 +104,17 @@ inline std::tuple<float, float, float> Project3DPointAndGetUVDepth(
     return std::make_tuple(u, v, z);
 }
 
+inline float DotProductWithSurfaceNormal(
+        const Eigen::Vector3d X, const Eigen::Vector3d N,
+        const PinholeCameraTrajectory& camera, int camid)
+{
+    Eigen::Vector3d Nt = camera.extrinsic_[camid].block<3,3>(0,0) * N;
+    Eigen::Vector4d Vt = camera.extrinsic_[camid] *
+        Eigen::Vector4d(X(0), X(1), X(2), 1);
+    Eigen::Vector3d Vtn = Vt.head(3) / Vt.head(3).norm();
+    return Vtn.dot(Nt);
+}
+
 std::tuple<std::vector<std::vector<int>>, std::vector<std::vector<int>>>
         MakeVertexAndImageVisibility(const TriangleMesh& mesh,
         const std::vector<RGBDImage>& images_rgbd,
@@ -117,6 +128,8 @@ std::tuple<std::vector<std::vector<int>>, std::vector<std::vector<int>>>
     std::vector<std::vector<int>> visiblity_image_to_vertex;
     visiblity_vertex_to_image.resize(n_vertex);
     visiblity_image_to_vertex.resize(n_camera);
+    double max_cos_th =
+        cos((180.0-option.max_angle_vertex_normal_camera_ray_) * M_PI / 180.0);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -134,6 +147,11 @@ std::tuple<std::vector<std::vector<int>>, std::vector<std::vector<int>>>
                 continue;
             if (*PointerAt<unsigned char>(images_mask[c], u_d, v_d) == 255)
                 continue;
+            if (mesh.HasVertexNormals()) {
+                Eigen::Vector3d N = mesh.vertex_normals_[vertex_id];
+                float cos_th = DotProductWithSurfaceNormal(X, N, camera, c);
+                if (cos_th > max_cos_th) continue;
+            }
             if (std::fabs(d - d_sensor) <
                     option.depth_threshold_for_visiblity_check_) {
 #ifdef _OPENMP
